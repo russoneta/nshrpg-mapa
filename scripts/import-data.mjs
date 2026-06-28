@@ -36,6 +36,8 @@ const COLORS = {
   'País de los Rios': '#19B3D0',            // cian
   'País de la Miel': '#E0A82E',             // ámbar miel
   'País del Oso': '#4A3528',                // marrón oscuro
+  'País del Hierro': '#6C5CE7',             // índigo
+  'País de la Cascada': '#00CEC9',          // turquesa
 };
 for (const id in (d.paises || {})) {
   d.paises[id].nombre = norm(d.paises[id].nombre);

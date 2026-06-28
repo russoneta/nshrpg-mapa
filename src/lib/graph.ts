@@ -15,6 +15,19 @@ export function realEdgeSet(data: MapData): Set<string> {
     }
   const real = new Set<string>();
   for (const [k, v] of dir) if (v) real.add(k);
+  // si una sala se quedaria sin ninguna conexion (todas sin direccion), le dejo
+  // esas conexiones asi no queda flotando aislada.
+  const deg = new Map<string, number>();
+  for (const id in data.rooms) deg.set(id, 0);
+  for (const k of real) { const [a, b] = k.split('|'); deg.set(a, (deg.get(a) || 0) + 1); deg.set(b, (deg.get(b) || 0) + 1); }
+  for (const [k, v] of dir) {
+    if (v) continue;
+    const [a, b] = k.split('|');
+    if (deg.get(a) === 0 || deg.get(b) === 0) {
+      real.add(k);
+      deg.set(a, (deg.get(a) || 0) + 1); deg.set(b, (deg.get(b) || 0) + 1);
+    }
+  }
   return real;
 }
 
