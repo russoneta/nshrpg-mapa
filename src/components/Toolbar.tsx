@@ -33,11 +33,7 @@ export function Toolbar(p: Props) {
       <button className={'btn block' + (p.edicion ? ' primary' : '')} onClick={() => p.setEdicion(!p.edicion)}>
         {p.edicion ? '✓ Editando: salas desbloqueadas' : '✏️ Editar / mover salas'}
       </button>
-      <div className="hint">
-        {p.edicion
-          ? 'Arrastrá las salas para acomodarlas. Se muestran los IDs y las salidas sin explorar.'
-          : 'Vista limpia para mostrar. Tocá «Editar» para poder mover salas.'}
-      </div>
+      {p.edicion && <div className="hint">Arrastrá las salas para acomodarlas. Se muestran los IDs y las salidas sin explorar.</div>}
       {p.edicion && (
         <button className="btn block sm" style={{ marginTop: 8 }} onClick={p.onReset}
           title="Recalcula las posiciones automáticamente y descarta lo que moviste a mano">

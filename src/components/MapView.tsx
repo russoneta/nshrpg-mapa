@@ -199,24 +199,32 @@ export function MapView(props: Props) {
         <defs>
           {Object.values(data.paises).map((pa) => (
             <radialGradient key={pa.id} id={'g' + pa.id}>
-              <stop offset="0%" stopColor={pa.color} stopOpacity={0.34} />
-              <stop offset="65%" stopColor={pa.color} stopOpacity={0.13} />
+              <stop offset="0%" stopColor={pa.color} stopOpacity={0.32} />
+              <stop offset="42%" stopColor={pa.color} stopOpacity={0.17} />
+              <stop offset="75%" stopColor={pa.color} stopOpacity={0.06} />
               <stop offset="100%" stopColor={pa.color} stopOpacity={0} />
             </radialGradient>
           ))}
         </defs>
         {Object.values(data.rooms).map((r) => {
           if (!r.pais) return null; const p = positions.get(r.roomId); if (!p) return null;
-          return <circle key={'h' + r.roomId} cx={p.x} cy={p.y} r={88} fill={`url(#g${r.pais})`} opacity={matchPais(r.pais) ? 1 : 0.2} />;
+          return <circle key={'h' + r.roomId} cx={p.x} cy={p.y} r={98} fill={`url(#g${r.pais})`} opacity={matchPais(r.pais) ? 1 : 0.18} />;
         })}
         {/* nombres de región (detrás) */}
-        {territories.map((t) => (
-          <text key={'tl' + t.pid} x={t.c.x} y={t.c.y} textAnchor="middle"
-            fontFamily="Cinzel, serif" fontSize={22} fill={t.color} fillOpacity={matchPais(t.pid) ? 0.55 : 0.2}
-            letterSpacing={1.5} style={{ pointerEvents: 'none', textTransform: 'uppercase' }}>
-            {data.paises[t.pid]?.nombre.replace(/^País (de la |de las |de los |del |de )?/, '')}
-          </text>
-        ))}
+        {territories.map((t) => {
+          const fs = Math.min(33, 18 + t.n * 1.0);
+          const name = (data.paises[t.pid]?.nombre || '').replace(/^País (de la |de las |de los |del |de )?/, '');
+          return (
+            <text key={'tl' + t.pid} x={t.c.x} y={t.c.y} textAnchor="middle" dominantBaseline="middle"
+              fontFamily="Cinzel, serif" fontWeight={600} fontSize={fs}
+              fill={t.color} fillOpacity={matchPais(t.pid) ? 0.42 : 0.14}
+              paintOrder="stroke" stroke="rgba(247,240,222,0.5)" strokeWidth={fs * 0.1}
+              letterSpacing={fs * 0.13}
+              style={{ pointerEvents: 'none', textTransform: 'uppercase' }}>
+              {name}
+            </text>
+          );
+        })}
         {/* aristas */}
         {edges.map(([a, b]) => {
           const pa = positions.get(a), pb = positions.get(b); if (!pa || !pb) return null;
@@ -270,11 +278,12 @@ function buildExportSVG(data: MapData, positions: Map<string, Pt>, paisColor: (i
   // territorios
   const by = new Map<string, Pt[]>();
   for (const id in data.rooms) { const r = data.rooms[id]; if (!r.pais) continue; const p = positions.get(id); if (p) (by.get(r.pais) || by.set(r.pais, []).get(r.pais)!).push(p); }
-  for (const id in data.rooms) { const r = data.rooms[id]; if (!r.pais) continue; const p = positions.get(id); if (p) s += `<circle cx="${p.x}" cy="${p.y}" r="74" fill="${paisColor(r.pais)}" fill-opacity="0.12"/>`; }
+  for (const id in data.rooms) { const r = data.rooms[id]; if (!r.pais) continue; const p = positions.get(id); if (p) s += `<circle cx="${p.x}" cy="${p.y}" r="92" fill="${paisColor(r.pais)}" fill-opacity="0.1"/>`; }
   for (const [pid, ps] of by) {
     const col = paisColor(pid), c = centroid(ps);
+    const fs = Math.min(33, 18 + ps.length * 1.0);
     const nm = esc((data.paises[pid]?.nombre || '').replace(/^País (de la |de las |de los |del |de )?/, '').toUpperCase());
-    s += `<text x="${c.x}" y="${c.y}" text-anchor="middle" font-family="Georgia, serif" font-size="22" fill="${col}" fill-opacity="0.5" letter-spacing="1.5">${nm}</text>`;
+    s += `<text x="${c.x}" y="${c.y}" text-anchor="middle" dominant-baseline="middle" font-family="Georgia, serif" font-weight="600" font-size="${fs}" fill="${col}" fill-opacity="0.42" paint-order="stroke" stroke="#e7d8b4" stroke-width="${(fs * 0.1).toFixed(1)}" letter-spacing="${(fs * 0.13).toFixed(1)}">${nm}</text>`;
   }
   // aristas
   const seen = new Set<string>();
