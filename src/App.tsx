@@ -23,6 +23,8 @@ export function App() {
   const [filterPais, setFilterPais] = useState<string | null>(null);
   const [path, setPath] = useState<string[] | null>(null);
   const [pathResult, setPathResult] = useState<{ len: number } | 'none' | null>(null);
+  const [routeFrom, setRouteFrom] = useState<string | null>(null);
+  const [routeTo, setRouteTo] = useState<string | null>(null);
   const [showRoute, setShowRoute] = useState(false);
   const [searchHits, setSearchHits] = useState<Set<string>>(new Set());
   const api = useRef<Api | null>(null);
@@ -91,13 +93,18 @@ export function App() {
   const onJump = useCallback((id: string) => { setSelected(id); setSearchHits(new Set([id])); api.current?.centerOn(id); }, []);
   const onSelect = useCallback((id: string | null) => setSelected(id), []);
 
-  const onTrazar = useCallback((from: string, to: string) => {
-    if (!data) return;
-    const pth = findPath(data, from, to);
-    if (pth) { setPath(pth); setPathResult({ len: pth.length }); setSelected(null); }
+  // la ruta se calcula sola cuando hay origen y destino
+  useEffect(() => {
+    if (!data || !routeFrom || !routeTo) { setPath(null); setPathResult(null); return; }
+    if (routeFrom === routeTo) { setPath([routeFrom]); setPathResult({ len: 1 }); return; }
+    const pth = findPath(data, routeFrom, routeTo);
+    if (pth) { setPath(pth); setPathResult({ len: pth.length }); }
     else { setPath(null); setPathResult('none'); }
-  }, [data]);
-  const onClearPath = useCallback(() => { setPath(null); setPathResult(null); setShowRoute(false); }, []);
+  }, [data, routeFrom, routeTo]);
+
+  const markOrigin = useCallback((id: string) => setRouteFrom((p) => (p === id ? null : id)), []);
+  const markDest = useCallback((id: string) => setRouteTo((p) => (p === id ? null : id)), []);
+  const onClearPath = useCallback(() => { setRouteFrom(null); setRouteTo(null); setShowRoute(false); }, []);
 
   const onReset = useCallback(() => {
     if (!data) return;
@@ -111,6 +118,8 @@ export function App() {
 
   const sel = selected ? data.rooms[selected] : null;
   const nPaises = counts.filter((c) => c.id && c.id !== '__sin__').length;
+  const originName = routeFrom && data.rooms[routeFrom] ? short(data.rooms[routeFrom].name) : null;
+  const destName = routeTo && data.rooms[routeTo] ? short(data.rooms[routeTo].name) : null;
 
   return (
     <div className="app">
@@ -127,14 +136,18 @@ export function App() {
 
       <div className="left-rail">
         <Toolbar edicion={edicion} setEdicion={setEdicion} options={options} findRoom={findRoom}
-          onJump={onJump} onTrazar={onTrazar} onClearPath={onClearPath} pathResult={pathResult}
+          onJump={onJump} pathResult={pathResult}
+          originName={originName} destName={destName}
+          onClearOrigin={() => setRouteFrom(null)} onClearDest={() => setRouteTo(null)} onClearPath={onClearPath}
           onShowRoute={() => setShowRoute(true)}
           onFit={() => api.current?.fit()} onPNG={() => api.current?.exportPNG()} onReset={onReset} />
         <Legend counts={counts} filterPais={filterPais} setFilterPais={setFilterPais} />
       </div>
 
       {sel && <SidePanel data={data} room={sel} paisColor={paisColor} edicion={edicion} realEdges={realEdges}
-        onSelect={onSelect} onClose={() => setSelected(null)} />}
+        onSelect={onSelect} onClose={() => setSelected(null)}
+        onOrigin={markOrigin} onDest={markDest}
+        isOrigin={routeFrom === sel.roomId} isDest={routeTo === sel.roomId} />}
 
       <div className="panel helpbar">{edicion ? 'Arrastrá una sala para acomodarla · ' : ''}arrastrá el fondo para mover · rueda para zoom</div>
 

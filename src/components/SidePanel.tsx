@@ -10,9 +10,13 @@ interface Props {
   realEdges: Set<string>;
   onSelect: (id: string) => void;
   onClose: () => void;
+  onOrigin: (id: string) => void;
+  onDest: (id: string) => void;
+  isOrigin: boolean;
+  isDest: boolean;
 }
 
-export function SidePanel({ data, room, paisColor, edicion, realEdges, onSelect, onClose }: Props) {
+export function SidePanel({ data, room, paisColor, edicion, realEdges, onSelect, onClose, onOrigin, onDest, isOrigin, isDest }: Props) {
   const pais = room.pais ? data.paises[room.pais] : null;
   const [imgErr, setImgErr] = useState(false);
   useEffect(() => setImgErr(false), [room.roomId]);
@@ -31,6 +35,15 @@ export function SidePanel({ data, room, paisColor, edicion, realEdges, onSelect,
           </div>
         </div>
         <button className="iconbtn" onClick={onClose} title="Cerrar">✕</button>
+      </div>
+
+      <div className="panel-pad row" style={{ paddingTop: 0, paddingBottom: 11 }}>
+        <button className={'btn sm' + (isOrigin ? ' primary' : '')} onClick={() => onOrigin(room.roomId)}>
+          {isOrigin ? '✓ Origen' : 'Marcar origen'}
+        </button>
+        <button className={'btn sm' + (isDest ? ' primary' : '')} onClick={() => onDest(room.roomId)}>
+          {isDest ? '✓ Destino' : 'Marcar destino'}
+        </button>
       </div>
 
       <div className="sp-scroll panel-pad" style={{ paddingTop: 0 }}>
