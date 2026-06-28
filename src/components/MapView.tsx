@@ -121,7 +121,7 @@ export function MapView(props: Props) {
       let dy = e.deltaY;
       if (e.deltaMode === 1) dy *= 16; else if (e.deltaMode === 2) dy *= 100; // líneas/páginas → px
       // zoom proporcional al movimiento (acompaña al trackpad) con tope por evento
-      const factor = Math.min(1.25, Math.max(0.8, Math.exp(-dy * 0.0011)));
+      const factor = Math.min(2, Math.max(0.5, Math.exp(-dy * 0.005)));
       setView((v) => {
         const k = Math.min(4, Math.max(0.12, v.k * factor));
         const wx = (cx - v.x) / v.k, wy = (cy - v.y) / v.k;
