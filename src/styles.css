@@ -139,6 +139,23 @@ input.txt::placeholder { color: #a8997a; }
 
 .scrim { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--font-display); color: var(--ink-soft); font-size: 18px; letter-spacing: 0.1em; }
 
+/* modal de la ruta */
+.modal-scrim { position: absolute; inset: 0; z-index: 50; background: rgba(38, 28, 12, 0.5); display: flex; align-items: center; justify-content: center; padding: 28px; backdrop-filter: blur(2px); }
+.route-modal { background: linear-gradient(180deg, #f4ecd6, #e7d9b6); border: 1.5px solid var(--line); border-radius: 12px; box-shadow: var(--shadow), inset 0 0 0 1px rgba(255, 252, 240, 0.5); width: min(1040px, 100%); max-height: 88vh; display: flex; flex-direction: column; }
+.rm-head { display: flex; align-items: center; justify-content: space-between; padding: 15px 20px; border-bottom: 1px solid var(--line-soft); }
+.rm-head h2 { font-family: var(--font-display); font-weight: 700; font-size: 20px; margin: 0; letter-spacing: 0.04em; }
+.rm-breadcrumb { padding: 12px 20px; font-size: 13px; color: var(--ink-soft); line-height: 1.8; border-bottom: 1px solid var(--line-soft); }
+.rm-breadcrumb b { color: var(--gold); text-transform: uppercase; letter-spacing: 0.06em; font-size: 12px; }
+.rm-step { white-space: nowrap; }
+.rm-grid { padding: 18px 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(208px, 1fr)); gap: 16px; overflow-y: auto; }
+.rm-card { background: rgba(255, 253, 245, 0.55); border: 1px solid var(--line); border-radius: 10px; padding: 9px; cursor: pointer; transition: transform 0.09s, box-shadow 0.13s; }
+.rm-card:hover { transform: translateY(-2px); box-shadow: 0 7px 18px rgba(60, 42, 16, 0.22); }
+.rm-card img, .rm-card .ph { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 7px; border: 1px solid var(--line-soft); display: block; background: #cdbb92; }
+.rm-card .ph { display: flex; align-items: center; justify-content: center; color: #a8997a; font-size: 12px; }
+.rm-card-title { font-family: var(--font-display); font-size: 14px; font-weight: 600; line-height: 1.25; margin-top: 9px; display: flex; align-items: center; }
+.rm-card-sub { font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
+.rm-num { display: inline-flex; align-items: center; justify-content: center; width: 21px; height: 21px; min-width: 21px; border-radius: 50%; background: linear-gradient(180deg, #b98e3e, #9a7128); color: #fdf6e6; font-size: 12px; font-weight: 700; margin-right: 7px; }
+
 @media (max-width: 760px) {
   .left-rail { width: calc(100vw - 36px); bottom: auto; max-height: calc(100vh - 36px); }
   .legend { display: none; }

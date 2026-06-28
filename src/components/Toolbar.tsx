@@ -9,6 +9,7 @@ interface Props {
   onJump: (id: string) => void;
   onTrazar: (from: string, to: string) => void; onClearPath: () => void;
   pathResult: { len: number } | 'none' | null;
+  onShowRoute: () => void;
   onFit: () => void; onPNG: () => void; onReset: () => void;
 }
 
@@ -71,7 +72,10 @@ export function Toolbar(p: Props) {
       {err && <div className="hint err">{err}</div>}
       {!err && p.pathResult === 'none' && <div className="hint">No hay camino entre esas salas.</div>}
       {!err && p.pathResult && p.pathResult !== 'none' && (
-        <div style={{ fontSize: 13, marginTop: 8 }}>Ruta: <b>{p.pathResult.len} salas</b> · {p.pathResult.len - 1} saltos</div>
+        <>
+          <div style={{ fontSize: 13, marginTop: 8 }}>Ruta: <b>{p.pathResult.len} salas</b> · {p.pathResult.len - 1} saltos</div>
+          <button className="btn block sm" style={{ marginTop: 8 }} onClick={p.onShowRoute}>Ver las salas de la ruta</button>
+        </>
       )}
 
       <div className="divider" />

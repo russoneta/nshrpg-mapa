@@ -6,6 +6,7 @@ import { MapView, Api } from './components/MapView';
 import { SidePanel } from './components/SidePanel';
 import { Toolbar, Opt } from './components/Toolbar';
 import { Legend, CountRow } from './components/Legend';
+import { RouteModal } from './components/RouteModal';
 
 const PIN_KEY = 'nshrpg_pins';
 
@@ -22,6 +23,7 @@ export function App() {
   const [filterPais, setFilterPais] = useState<string | null>(null);
   const [path, setPath] = useState<string[] | null>(null);
   const [pathResult, setPathResult] = useState<{ len: number } | 'none' | null>(null);
+  const [showRoute, setShowRoute] = useState(false);
   const [searchHits, setSearchHits] = useState<Set<string>>(new Set());
   const api = useRef<Api | null>(null);
 
@@ -95,7 +97,7 @@ export function App() {
     if (pth) { setPath(pth); setPathResult({ len: pth.length }); setSelected(null); }
     else { setPath(null); setPathResult('none'); }
   }, [data]);
-  const onClearPath = useCallback(() => { setPath(null); setPathResult(null); }, []);
+  const onClearPath = useCallback(() => { setPath(null); setPathResult(null); setShowRoute(false); }, []);
 
   const onReset = useCallback(() => {
     if (!data) return;
@@ -126,6 +128,7 @@ export function App() {
       <div className="left-rail">
         <Toolbar edicion={edicion} setEdicion={setEdicion} options={options} findRoom={findRoom}
           onJump={onJump} onTrazar={onTrazar} onClearPath={onClearPath} pathResult={pathResult}
+          onShowRoute={() => setShowRoute(true)}
           onFit={() => api.current?.fit()} onPNG={() => api.current?.exportPNG()} onReset={onReset} />
         <Legend counts={counts} filterPais={filterPais} setFilterPais={setFilterPais} />
       </div>
@@ -134,6 +137,12 @@ export function App() {
         onSelect={onSelect} onClose={() => setSelected(null)} />}
 
       <div className="panel helpbar">{edicion ? 'Arrastrá una sala para acomodarla · ' : ''}arrastrá el fondo para mover · rueda para zoom</div>
+
+      {showRoute && path && (
+        <RouteModal data={data} path={path}
+          onPick={(id) => { setShowRoute(false); onJump(id); }}
+          onClose={() => setShowRoute(false)} />
+      )}
     </div>
   );
 }
