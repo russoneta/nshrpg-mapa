@@ -139,6 +139,10 @@ input.txt::placeholder { color: #a8997a; }
 .notas { font-size: 13px; line-height: 1.5; white-space: pre-wrap; background: rgba(255, 253, 245, 0.5); border: 1px dashed var(--line-soft); border-radius: 7px; padding: 8px 10px; margin-top: 6px; }
 .ee-badge { display: inline-block; background: #6e40c9; color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 12px; margin-top: 8px; }
 .rid { font-family: ui-monospace, monospace; font-size: 11px; color: var(--ink-soft); }
+.rid-copy { display: flex; align-items: center; gap: 8px; width: 100%; background: rgba(255, 253, 245, 0.5); border: 1px solid var(--line-soft); border-radius: 7px; padding: 6px 9px; cursor: pointer; text-align: left; transition: border-color 0.12s; }
+.rid-copy:hover { border-color: var(--gold); }
+.rid-copy .rid { flex: 1; }
+.rid-copy .rid-hint { font-size: 10.5px; font-weight: 600; color: var(--gold); text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
 .iconbtn { border: 0; background: transparent; cursor: pointer; color: var(--ink-soft); font-size: 18px; line-height: 1; padding: 2px; }
 .iconbtn:hover { color: var(--ink); }
 

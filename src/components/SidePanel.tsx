@@ -20,6 +20,14 @@ export function SidePanel({ data, room, paisColor, edicion, realEdges, onSelect,
   const pais = room.pais ? data.paises[room.pais] : null;
   const [imgErr, setImgErr] = useState(false);
   useEffect(() => setImgErr(false), [room.roomId]);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => setCopied(false), [room.roomId]);
+  const copyId = () => {
+    const flash = () => { setCopied(true); setTimeout(() => setCopied(false), 1500); };
+    const legacy = () => { try { const ta = document.createElement('textarea'); ta.value = room.roomId; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); flash(); } catch { /* ignore */ } };
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(room.roomId).then(flash).catch(legacy);
+    else legacy();
+  };
 
   // solo conexiones con direccion; las "sin explorar" solo cuando edito
   const exits = (room.exits || []).filter((e) => (e.to ? realEdges.has(edgeKey(room.roomId, e.to)) : edicion));
@@ -80,12 +88,11 @@ export function SidePanel({ data, room, paisColor, edicion, realEdges, onSelect,
         )}
 
         {edicion && room.ee && <div><span className="ee-badge">★ Easter egg</span></div>}
-        {edicion && (
-          <>
-            <div className="divider" />
-            <div className="rid">roomId {room.roomId}</div>
-          </>
-        )}
+        <div className="divider" />
+        <button className="rid-copy" onClick={copyId} title="Click para copiar el ID">
+          <span className="rid">ID {room.roomId}</span>
+          <span className="rid-hint">{copied ? '✓ copiado' : '⧉ copiar'}</span>
+        </button>
       </div>
     </div>
   );
