@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
 import { MapData, Pt, short } from '../lib/types';
 import { centroid, edgeKey } from '../lib/graph';
 import { buildWorld } from '../lib/worldgen';
@@ -106,16 +106,18 @@ export function MapView(props: Props) {
   }, [positions]);
 
   useEffect(() => { apiRef.current = { fit, exportPNG, centerOn }; }, [fit, exportPNG, centerOn, apiRef]);
-  useEffect(() => {
+  // encuadre inicial ANTES del primer paint (sin flash de la vista por defecto) y sin depender
+  // de requestAnimationFrame, que se pausa cuando la pestaña no esta enfocada
+  useLayoutEffect(() => {
     if (fitted.current || !positions.size) return;
-    let raf = 0;
-    const tryFit = () => {
-      const svg = svgRef.current;
-      if (svg && svg.clientWidth > 1 && svg.clientHeight > 1) { fitted.current = true; fit(); }
-      else raf = requestAnimationFrame(tryFit);
-    };
-    raf = requestAnimationFrame(tryFit);
-    return () => cancelAnimationFrame(raf);
+    const svg = svgRef.current; if (!svg) return;
+    if (svg.clientWidth > 1 && svg.clientHeight > 1) { fitted.current = true; fit(); return; }
+    // aun sin tamano: encuadrar cuando el contenedor se dimensione
+    const ro = new ResizeObserver(() => {
+      if (svg.clientWidth > 1 && svg.clientHeight > 1) { fitted.current = true; fit(); ro.disconnect(); }
+    });
+    ro.observe(svg);
+    return () => ro.disconnect();
   }, [positions, fit]);
 
   // wheel zoom (non-passive)
