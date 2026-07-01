@@ -39,7 +39,7 @@ export function Toolbar(p: Props) {
       <div className="divider" />
       <h2 className="sec">Vista</h2>
       <button className={'btn block' + (p.edicion ? ' primary' : '')} onClick={() => p.setEdicion(!p.edicion)}>
-        {p.edicion ? '✓ Editando: salas desbloqueadas' : '✏️ Editar / mover salas'}
+        {p.edicion ? '✓ Editando: salas desbloqueadas' : 'Editar / mover salas'}
       </button>
       {p.edicion && <div className="hint">Arrastrá las salas para acomodarlas. Se muestran los IDs y las salidas sin explorar.</div>}
       {p.edicion && (

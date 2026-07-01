@@ -17,23 +17,22 @@ html, body, #root { height: 100%; margin: 0; }
 body {
   font-family: var(--font-body);
   color: var(--ink);
-  background: #d8c6a0;
+  background: #93a7b6;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
 }
 
 .app { position: fixed; inset: 0; overflow: hidden; }
 
-/* Fondo pergamino con viñeta + ruido sutil */
+/* Fondo de mar (por si el pan se pasa del rect de oceano del SVG) */
 .parchment {
   position: absolute; inset: 0;
   background:
-    radial-gradient(130% 100% at 50% -10%, rgba(255, 250, 233, 0.75), transparent 55%),
-    radial-gradient(150% 130% at 50% 115%, rgba(95, 66, 28, 0.28), transparent 55%),
-    linear-gradient(135deg, #efe2c1 0%, #e4d3aa 45%, #d7c49b 100%);
+    radial-gradient(140% 110% at 50% -10%, rgba(198, 214, 227, 0.5), transparent 60%),
+    linear-gradient(160deg, #a6b8c6 0%, #9fb2bd 55%, #93a7b6 100%);
 }
 .parchment::after {
-  content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0.05; mix-blend-mode: multiply;
+  content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0.035; mix-blend-mode: multiply;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 

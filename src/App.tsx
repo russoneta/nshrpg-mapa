@@ -130,7 +130,7 @@ export function App() {
         onSelect={onSelect} onHover={setHovered} onMoveNode={onMoveNode} apiRef={api} />
 
       <div className="panel title-banner">
-        <h1>Mundo NSHRPG <span className="alpha">ALPHA 1.2</span></h1>
+        <h1>Mundo NSHRPG <span className="alpha">ALPHA 1.23</span></h1>
         <div className="sub">{Object.keys(data.rooms).length} salas · {nPaises} países · by Take</div>
       </div>
 

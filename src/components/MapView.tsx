@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
 import { MapData, Pt, short } from '../lib/types';
-import { convexHull, centroid, edgeKey } from '../lib/graph';
+import { centroid, edgeKey } from '../lib/graph';
+import { buildWorld } from '../lib/worldgen';
 
 export interface Api { fit: () => void; exportPNG: () => void; centerOn: (id: string) => void; }
 interface Props {
@@ -23,6 +24,22 @@ interface Props {
 
 const INK = '#2e2718';
 const GOLD = '#9a7b34';
+// paleta del mapa (mar/tierra) — apagada, cartografica
+const SEA = '#9fb2bd', LAND = '#c3cdae', COAST = '#7f8894', BORDER = '#8f97a0', LABEL_INK = '#3c4a52';
+const REGION_OP = 0.55; // opacidad del color de pais sobre la tierra (apagado, no chillon)
+const MOAT_W = 46;      // ancho (en unidades de mapa) del mar que rodea cada isla
+const IMG_ON = 0.95, IMG_TINT = 0.34; // opacidad de la imagen de fondo del pais y del tinte de su color encima
+
+// imagen de fondo por pais (archivo en public/img/paises/). Los que no estan usan color plano.
+const PAIS_IMG: Record<string, string> = {
+  'pais-del-fuego': 'pais-del-fuego.jpeg', 'pais-del-agua': 'pais-del-agua.webp', 'pais-del-rayo': 'pais-del-rayo.webp',
+  'pais-de-la-lluvia': 'pais-de-la-lluvia.webp', 'pais-del-viento': 'pais-del-viento.webp', 'pais-de-la-tierra': 'pais-de-la-tierra.jpg',
+  'pais-del-remolino': 'pais-del-remolino.webp', 'pais-de-la-nieve': 'pais-de-la-nieve.webp', 'pais-de-la-hierba': 'pais-de-la-hierba.webp',
+  'pais-de-la-cascada': 'pais-de-la-cascada.webp', 'pais-de-las-llaves': 'pais-de-las-llaves.webp', 'pais-del-oso': 'pais-del-oso.webp',
+  'pais-de-los-rios': 'pais-de-los-rios.jpeg', 'pais-del-hierro': 'pais-del-hierro.webp', 'pais-de-la-miel': 'pais-de-la-miel.jpeg',
+  'pais-de-la-piedra': 'pais-de-la-piedra.jpeg', 'pais-del-arroz': 'pais-del-arroz.webp',
+  'pais-de-las-aguas-termales': 'pais-de-las-aguas-termales.webp', 'pais-del-te': 'pais-del-te.webp',
+};
 
 export function MapView(props: Props) {
   const { data, positions, paisColor, selected, hovered, path, frontier, realEdges, filterPais, searchHits, edicion, onSelect, onHover, onMoveNode, apiRef } = props;
@@ -50,17 +67,7 @@ export function MapView(props: Props) {
     return out;
   }, [data, realEdges]);
 
-  const territories = useMemo(() => {
-    const by = new Map<string, Pt[]>();
-    for (const id in data.rooms) {
-      const r = data.rooms[id]; if (!r.pais) continue;
-      const p = positions.get(id); if (!p) continue;
-      (by.get(r.pais) || by.set(r.pais, []).get(r.pais)!).push(p);
-    }
-    const out: { pid: string; hull: Pt[]; c: Pt; color: string; n: number }[] = [];
-    for (const [pid, pts] of by) out.push({ pid, hull: convexHull(pts), c: centroid(pts), color: paisColor(pid), n: pts.length });
-    return out;
-  }, [data, positions, paisColor]);
+  const world = useMemo(() => buildWorld(positions, data), [positions, data]);
 
   const fit = useCallback(() => {
     const svg = svgRef.current; if (!svg) return;
@@ -191,38 +198,62 @@ export function MapView(props: Props) {
   const matchPais = (pais: string | null) => (!filterPais ? true : filterPais === '__sin__' ? pais === null : pais === filterPais);
   const dimmed = (id: string) => !matchPais(data.rooms[id]?.pais ?? null);
 
+  // relleno de una region: imagen de fondo (clipeada a la region) + tinte de su color (acento).
+  // Sin imagen -> color plano.
+  const renderRegion = (rg: { pid: string; d: string; color: string; bx: number; by: number; bw: number; bh: number }) => {
+    const on = matchPais(rg.pid);
+    const f = PAIS_IMG[rg.pid];
+    if (!f) return <path key={'rg' + rg.pid} d={rg.d} fill={rg.color} fillOpacity={on ? REGION_OP : 0.12} stroke="none" style={{ pointerEvents: 'none' }} />;
+    return (
+      <g key={'rg' + rg.pid} clipPath={`url(#rgclip-${rg.pid})`} style={{ pointerEvents: 'none' }}>
+        <image href={`img/paises/${f}`} x={rg.bx} y={rg.by} width={rg.bw} height={rg.bh} preserveAspectRatio="xMidYMid slice" opacity={on ? IMG_ON : 0.28} />
+        <path d={rg.d} fill={rg.color} fillOpacity={on ? IMG_TINT : 0.1} stroke="none" />
+      </g>
+    );
+  };
+
   return (
     <svg ref={svgRef} className={'map-svg' + (grabbing ? ' grabbing' : '')}
       onPointerDown={onPointerDownBg} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
       <g transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
-        {/* halos de color por sala, asi se arman las regiones */}
+        {/* --- capa de mundo: mar + tierra + regiones por pais + fronteras + costa + kanji --- */}
         <defs>
-          {Object.values(data.paises).map((pa) => (
-            <radialGradient key={pa.id} id={'g' + pa.id}>
-              <stop offset="0%" stopColor={pa.color} stopOpacity={0.32} />
-              <stop offset="42%" stopColor={pa.color} stopOpacity={0.17} />
-              <stop offset="75%" stopColor={pa.color} stopOpacity={0.06} />
-              <stop offset="100%" stopColor={pa.color} stopOpacity={0} />
-            </radialGradient>
-          ))}
+          <clipPath id="contclip"><path d={world.continent} /></clipPath>
+          {world.regions.map((rg) => (PAIS_IMG[rg.pid] ? <clipPath key={'rc' + rg.pid} id={'rgclip-' + rg.pid}><path d={rg.d} /></clipPath> : null))}
         </defs>
-        {Object.values(data.rooms).map((r) => {
-          if (!r.pais) return null; const p = positions.get(r.roomId); if (!p) return null;
-          return <circle key={'h' + r.roomId} cx={p.x} cy={p.y} r={98} fill={`url(#g${r.pais})`} opacity={matchPais(r.pais) ? 1 : 0.18} />;
-        })}
-        {/* nombres de región (detrás) */}
-        {territories.map((t) => {
-          const fs = Math.min(33, 18 + t.n * 1.0);
-          const name = (data.paises[t.pid]?.nombre || '').replace(/^País (de la |de las |de los |del |de )?/, '');
+        <rect x={world.seaRect.x} y={world.seaRect.y} width={world.seaRect.w} height={world.seaRect.h} fill={SEA} />
+        <path d={world.land} fill={LAND} stroke="none" />
+        {/* regiones del CONTINENTE (solo paises del continente, clipeadas al continente) */}
+        <g clipPath="url(#contclip)">
+          {world.regions.filter((rg) => !rg.island).map(renderRegion)}
+        </g>
+        <path d={world.borders} fill="none" stroke={BORDER} strokeWidth={1} strokeOpacity={0.7}
+          strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+        <path d={world.coast} fill="none" stroke={COAST} strokeWidth={1.2}
+          strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+        {/* recorte: penínsulas sin sentido (sostenidas solo por salas de mar) se pintan como MAR */}
+        {world.trimSea && <path d={world.trimSea} fill={SEA} stroke="none" />}
+        {/* moat de MAR alrededor de cada isla + isla redibujada encima (solo SU region) */}
+        {world.islands.map(({ pid, d }, i) => (
+          <g key={'moat' + i}>
+            <path d={d} fill="none" stroke={SEA} strokeWidth={MOAT_W * 2} strokeLinejoin="round" strokeLinecap="round" />
+            <path d={d} fill={LAND} stroke="none" />
+            <clipPath id={'islclip' + i}><path d={d} /></clipPath>
+            <g clipPath={`url(#islclip${i})`}>
+              {world.regions.filter((rg) => rg.pid === pid).map(renderRegion)}
+            </g>
+            <path d={d} fill="none" stroke={COAST} strokeWidth={1.2} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+          </g>
+        ))}
+        {world.kanji.map((k) => {
+          const fs = Math.min(172, 52 + k.n * 3.6), on = matchPais(k.pid);
           return (
-            <text key={'tl' + t.pid} x={t.c.x} y={t.c.y} textAnchor="middle" dominantBaseline="middle"
-              fontFamily="Cinzel, serif" fontWeight={600} fontSize={fs}
-              fill={t.color} fillOpacity={matchPais(t.pid) ? 0.42 : 0.14}
-              paintOrder="stroke" stroke="rgba(247,240,222,0.5)" strokeWidth={fs * 0.1}
-              letterSpacing={fs * 0.13}
-              style={{ pointerEvents: 'none', textTransform: 'uppercase' }}>
-              {name}
-            </text>
+            <text key={'k' + k.pid} x={k.x} y={k.y} textAnchor="middle" dominantBaseline="central"
+              fontFamily="'Hiragino Mincho ProN','Yu Mincho','Noto Serif JP','Noto Sans JP',serif"
+              fontSize={fs} fontWeight={700}
+              fill={LABEL_INK} fillOpacity={on ? 0.5 : 0.14}
+              paintOrder="stroke" stroke="#f3efe4" strokeOpacity={on ? 0.5 : 0.14} strokeWidth={fs * 0.05}
+              style={{ pointerEvents: 'none' }}>{k.glyph}</text>
           );
         })}
         {/* aristas */}
