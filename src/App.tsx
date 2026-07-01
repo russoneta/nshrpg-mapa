@@ -138,6 +138,7 @@ export function App() {
         <Toolbar edicion={edicion} setEdicion={setEdicion} options={options} findRoom={findRoom}
           onJump={onJump} pathResult={pathResult}
           originName={originName} destName={destName}
+          onSetOrigin={setRouteFrom} onSetDest={setRouteTo}
           onClearOrigin={() => setRouteFrom(null)} onClearDest={() => setRouteTo(null)} onClearPath={onClearPath}
           onShowRoute={() => setShowRoute(true)}
           onFit={() => api.current?.fit()} onPNG={() => api.current?.exportPNG()} onReset={onReset} />

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 export interface Opt { id: string; label: string; }
 
@@ -8,6 +8,7 @@ interface Props {
   findRoom: (text: string) => string | null;
   onJump: (id: string) => void;
   originName: string | null; destName: string | null;
+  onSetOrigin: (id: string) => void; onSetDest: (id: string) => void;
   onClearOrigin: () => void; onClearDest: () => void; onClearPath: () => void;
   pathResult: { len: number } | 'none' | null;
   onShowRoute: () => void;
@@ -16,8 +17,15 @@ interface Props {
 
 export function Toolbar(p: Props) {
   const [jump, setJump] = useState('');
-  const doJump = (t: string) => { const id = p.findRoom(t); if (id) { p.onJump(id); setJump(''); } };
+  const [oDraft, setODraft] = useState('');
+  const [dDraft, setDDraft] = useState('');
+  // el input muestra lo que se marcó en el mapa (o lo que se escribió)
+  useEffect(() => { setODraft(p.originName || ''); }, [p.originName]);
+  useEffect(() => { setDDraft(p.destName || ''); }, [p.destName]);
+
   const exact = (v: string) => p.options.some((op) => op.label === v);
+  const doJump = (t: string) => { const id = p.findRoom(t); if (id) { p.onJump(id); setJump(''); } };
+  const tryResolve = (v: string, set: (id: string) => void) => { const id = p.findRoom(v); if (id) set(id); };
 
   return (
     <div className="panel toolbar panel-pad">
@@ -43,15 +51,19 @@ export function Toolbar(p: Props) {
 
       <div className="divider" />
       <h2 className="sec">Trazar ruta</h2>
-      <div className="hint" style={{ marginTop: 0, marginBottom: 8 }}>Tocá una sala en el mapa y elegila como origen o destino.</div>
+      <div className="hint" style={{ marginTop: 0, marginBottom: 8 }}>Escribí una sala o tocala en el mapa.</div>
       <div className="slot">
         <span className="slot-tag o">Origen</span>
-        <span className="slot-name">{p.originName || <i>— elegí una sala</i>}</span>
+        <input className="slot-input" list="rooms" placeholder="sala…" value={oDraft}
+          onChange={(e) => { setODraft(e.target.value); if (exact(e.target.value)) tryResolve(e.target.value, p.onSetOrigin); }}
+          onKeyDown={(e) => { if (e.key === 'Enter') tryResolve((e.target as HTMLInputElement).value, p.onSetOrigin); }} />
         {p.originName && <button className="iconbtn" onClick={p.onClearOrigin} title="Quitar origen">✕</button>}
       </div>
       <div className="slot">
         <span className="slot-tag d">Destino</span>
-        <span className="slot-name">{p.destName || <i>— elegí una sala</i>}</span>
+        <input className="slot-input" list="rooms" placeholder="sala…" value={dDraft}
+          onChange={(e) => { setDDraft(e.target.value); if (exact(e.target.value)) tryResolve(e.target.value, p.onSetDest); }}
+          onKeyDown={(e) => { if (e.key === 'Enter') tryResolve((e.target as HTMLInputElement).value, p.onSetDest); }} />
         {p.destName && <button className="iconbtn" onClick={p.onClearDest} title="Quitar destino">✕</button>}
       </div>
       {p.pathResult === 'none' && <div className="hint">No hay camino entre esas salas.</div>}

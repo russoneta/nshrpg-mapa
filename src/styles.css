@@ -83,6 +83,10 @@ h2.sec { font-family: var(--font-display); font-weight: 600; font-size: 13px; le
 .slot-tag.d { background: #9a7128; }
 .slot-name { flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .slot-name i { color: var(--ink-soft); }
+.slot:focus-within { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(154, 123, 52, 0.2); }
+.slot-input { flex: 1; min-width: 0; background: transparent; border: none; color: var(--ink); font-family: var(--font-body); font-size: 13px; padding: 2px 0; }
+.slot-input:focus { outline: none; }
+.slot-input::placeholder { color: #a8997a; }
 
 label.fld { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-soft); margin: 8px 0 3px; }
 input.txt, select.sel {
