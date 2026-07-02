@@ -24,8 +24,28 @@ interface Props {
 
 const INK = '#2e2718';
 const GOLD = '#9a7b34';
+const ROUTE = '#2a3138';      // trazados sala-a-sala (tinta oscura neutra)
+const ROUTE_CASE = '#eef2f2'; // halo claro debajo de la ruta para que se lea sobre cualquier fondo
+const NODE_RING = '#20190d';  // anillo del nodo (casi negro)
 // paleta del mapa (mar/tierra) — apagada, cartografica
-const SEA = '#9fb2bd', LAND = '#c3cdae', COAST = '#7f8894', BORDER = '#8f97a0', LABEL_INK = '#3c4a52';
+const SEA = '#9fb2bd', LAND = '#c3cdae', COAST = '#7f8894', LABEL_INK = '#3c4a52';
+
+// version mas intensa (saturada + oscura) del color de un pais, para su borde.
+// Piso de contraste: los colores CLAROS (ej Nieve #A6DCEF, cyan casi blanco) se saturan y
+// oscurecen MAS para que su borde se lea sobre el mar; los ya oscuros/medios (Fuego, Tierra,
+// Viento, etc.) no se tocan (lum < 0.55 -> sat 1.3 / oscurece a 0.6, como antes).
+function intensify(hex: string): string {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  if (!m) return hex;
+  let r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;   // luminancia percibida del color original
+  const light = Math.max(0, lum - 0.55);                   // cuanto pasa de "medio-claro" (0 si es oscuro/medio)
+  const avg = (r + g + b) / 3, sat = 1.3 + light * 2.4;    // empuja el color lejos del gris (mas si es claro)
+  r = avg + (r - avg) * sat; g = avg + (g - avg) * sat; b = avg + (b - avg) * sat;
+  const dark = 0.6 - light * 0.9;                          // y lo oscurece (mas si es claro)
+  const cl = (v: number) => Math.max(0, Math.min(255, Math.round(v * dark)));
+  return `rgb(${cl(r)}, ${cl(g)}, ${cl(b)})`;
+}
 const REGION_OP = 0.55; // opacidad del color de pais sobre la tierra (apagado, no chillon)
 const MOAT_W = 46;      // ancho (en unidades de mapa) del mar que rodea cada isla
 const IMG_ON = 0.95, IMG_TINT = 0.34; // opacidad de la imagen de fondo del pais y del tinte de su color encima
@@ -221,32 +241,89 @@ export function MapView(props: Props) {
         {/* --- capa de mundo: mar + tierra + regiones por pais + fronteras + costa + kanji --- */}
         <defs>
           <clipPath id="contclip"><path d={world.continent} /></clipPath>
-          {world.regions.map((rg) => (PAIS_IMG[rg.pid] ? <clipPath key={'rc' + rg.pid} id={'rgclip-' + rg.pid}><path d={rg.d} /></clipPath> : null))}
+          <clipPath id="landmaskclip"><path d={world.landMask} /></clipPath>
+          {world.regions.map((rg) => (<clipPath key={'rc' + rg.pid} id={'rgclip-' + rg.pid}><path d={rg.d} /></clipPath>))}
+          {world.islands.map(({ moatClip }, i) => (<clipPath key={'mc' + i} id={'moatclip-' + i}><path d={moatClip} /></clipPath>))}
         </defs>
         <rect x={world.seaRect.x} y={world.seaRect.y} width={world.seaRect.w} height={world.seaRect.h} fill={SEA} />
         <path d={world.land} fill={LAND} stroke="none" />
-        {/* regiones del CONTINENTE (solo paises del continente, clipeadas al continente) */}
+        {/* (moatpre eliminado: era un stroke de mar redundante alrededor de la isla que asomaba como
+            lineas grises sobre el sage; el moat real ahora lo da el overlay moatClip mas abajo) */}
+        {/* regiones del CONTINENTE (clipeadas al continente para una costa suave) */}
         <g clipPath="url(#contclip)">
           {world.regions.filter((rg) => !rg.island).map(renderRegion)}
         </g>
-        <path d={world.borders} fill="none" stroke={BORDER} strokeWidth={1} strokeOpacity={0.7}
-          strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
-        <path d={world.coast} fill="none" stroke={COAST} strokeWidth={1.2}
-          strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-        {/* recorte: penínsulas sin sentido (sostenidas solo por salas de mar) se pintan como MAR */}
-        {world.trimSea && <path d={world.trimSea} fill={SEA} stroke="none" />}
-        {/* moat de MAR alrededor de cada isla + isla redibujada encima (solo SU region) */}
-        {world.islands.map(({ pid, d }, i) => (
-          <g key={'moat' + i}>
-            <path d={d} fill="none" stroke={SEA} strokeWidth={MOAT_W * 2} strokeLinejoin="round" strokeLinecap="round" />
-            <path d={d} fill={LAND} stroke="none" />
-            <clipPath id={'islclip' + i}><path d={d} /></clipPath>
-            <g clipPath={`url(#islclip${i})`}>
-              {world.regions.filter((rg) => rg.pid === pid).map(renderRegion)}
+        {/* (sin costa gris del continente: los bordes de color de cada pais ya delimitan la costa;
+            world.continent trazaba fingers/entrantes en el mar donde ningun pais llega -> lineas sueltas.
+            Las costas de las dos ISLAS se siguen dibujando en gris aparte, en L297.) */}
+        {/* borde de cada pais del continente (2 tramos): costa = contorno del continente recortado a la
+            region; interior = region.d inset. Anchos para solaparse en las uniones. */}
+        {world.regions.filter((rg) => !rg.island).map((rg) => {
+          const col = intensify(rg.color), op = matchPais(rg.pid) ? 0.95 : 0.22;
+          return (
+            <g key={'pb' + rg.pid} style={{ pointerEvents: 'none' }}>
+              {/* costa: contorno del continente ∩ region ∩ banda de tierra real (landmaskclip evita
+                  que los "fingers" del contorno lejos de toda tierra con dueño se pinten de color) */}
+              <g clipPath="url(#landmaskclip)">
+                <g clipPath={`url(#rgclip-${rg.pid})`}>
+                  <path d={world.continent} fill="none" stroke={col} strokeWidth={4.5} strokeOpacity={op}
+                    strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+                </g>
+              </g>
+              {/* contorno REAL del pais (rg.bd) recortado al continente Y a la banda de tierra real
+                  (landmaskclip): cierra la costa que world.continent∩rgclip deja fuera SIN dejar que
+                  bd flote en el estrecho / mar abierto (fuera de la banda no se dibuja). */}
+              <g clipPath="url(#landmaskclip)">
+                <g clipPath="url(#contclip)">
+                  <path d={rg.bd} fill="none" stroke={col} strokeWidth={4.5} strokeOpacity={op}
+                    strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+                </g>
+              </g>
+              {/* (piece 3 — el trazo interior de rg.d — ELIMINADO: no delineaba ninguna costa propia
+                  (todo su borde real ya lo llevan continent∩rgclip y bd) y era la MAYOR fuente de
+                  lineas sueltas: trazaba el globo dilatado de rg.d cruzando el estrecho/mar abierto
+                  donde ningun overlay de mar lo tapa.) */}
             </g>
-            <path d={d} fill="none" stroke={COAST} strokeWidth={1.2} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-          </g>
+          );
+        })}
+        {/* MOAT: disco de mar de ancho fijo (dilate cellLand MOAT_CELLS) sobre el relleno del continente
+            y del sage base -> anillo de mar ancho y uniforme; tapa la peninsula sage y cualquier derrame */}
+        {world.islands.map(({ moatClip }, i) => (
+          <path key={'moatband' + i} d={moatClip} fill={SEA} stroke="none" />
         ))}
+        {/* isla redibujada encima (tapa el centro del disco -> queda el anillo de mar) + SU borde */}
+        {world.islands.map(({ pid, d }, i) => {
+          const rg = world.regions.find((r) => r.pid === pid);
+          const col = rg ? intensify(rg.color) : COAST, op = matchPais(pid) ? 0.95 : 0.22;
+          return (
+            <g key={'moat' + i}>
+              <path d={d} fill={LAND} stroke="none" />
+              <clipPath id={'islclip' + i}><path d={d} /></clipPath>
+              {/* relleno: imagen/color sobre TODO el landmass d (clip solo a islclip, no a rg.d) */}
+              {rg && PAIS_IMG[pid] ? (
+                <g clipPath={`url(#islclip${i})`}>
+                  <image href={`img/paises/${PAIS_IMG[pid]}`} x={rg.bx} y={rg.by} width={rg.bw} height={rg.bh}
+                    preserveAspectRatio="xMidYMid slice" opacity={matchPais(pid) ? IMG_ON : 0.28} />
+                  <path d={d} fill={rg.color} fillOpacity={matchPais(pid) ? IMG_TINT : 0.1} />
+                </g>
+              ) : (
+                <path d={d} fill={rg ? rg.color : LAND} fillOpacity={matchPais(pid) ? REGION_OP : 0.12} />
+              )}
+              <path d={d} fill="none" stroke={COAST} strokeWidth={1.2} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+              {/* borde de la isla a ancho completo (sin clip): la mitad exterior cae sobre el moat */}
+              <path d={d} fill="none" stroke={col} strokeWidth={5} strokeOpacity={op}
+                strokeLinejoin="round" vectorEffect="non-scaling-stroke" style={{ pointerEvents: 'none' }} />
+            </g>
+          );
+        })}
+        {/* (arcos moat-vecino ELIMINADOS: pintaban el rim del moat recortado solo a rgclip (el globo
+            dilatado de rg.d), asi que paises lejanos (Te!) pintaban arcos colgando en mar abierto.
+            Ahora son redundantes: al limpiar el dueño de las celdas bajo el collar del moat, el bd de
+            cada pais ya traza su costa del estrecho exactamente en el rim — y bd si esta recortado a
+            la banda de tierra real.) */}
+        {/* recorte: penínsulas sin sentido (solo salas de mar) se pintan como MAR — DESPUES de los
+            bordes para tapar cualquier trazo fantasma sobre esas penínsulas trimeadas */}
+        {world.trimSea && <path d={world.trimSea} fill={SEA} stroke="none" />}
         {world.kanji.map((k) => {
           const fs = Math.min(172, 52 + k.n * 3.6), on = matchPais(k.pid);
           return (
@@ -258,15 +335,23 @@ export function MapView(props: Props) {
               style={{ pointerEvents: 'none' }}>{k.glyph}</text>
           );
         })}
-        {/* aristas */}
+        {/* aristas (rutas de tinta con halo para que se lean sobre cualquier fondo) */}
         {edges.map(([a, b]) => {
           const pa = positions.get(a), pb = positions.get(b); if (!pa || !pb) return null;
           const onPath = pathEdges.has(a < b ? `${a}|${b}` : `${b}|${a}`);
           const dim = filterPais && dimmed(a) && dimmed(b);
-          return <line key={a + b} x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y}
-            stroke={onPath ? GOLD : INK} strokeOpacity={onPath ? 1 : dim ? 0.12 : 0.32}
-            strokeWidth={onPath ? 4 : 1.6} strokeLinecap="round" vectorEffect="non-scaling-stroke"
-            strokeDasharray={onPath ? '1 7' : undefined} className={onPath ? 'flow' : undefined} />;
+          if (onPath)
+            return <line key={a + b} x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y}
+              stroke={GOLD} strokeOpacity={1} strokeWidth={4} strokeLinecap="round"
+              vectorEffect="non-scaling-stroke" strokeDasharray="1 7" className="flow" />;
+          return (
+            <g key={a + b} opacity={dim ? 0.14 : 1}>
+              <line x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y} stroke={ROUTE_CASE} strokeOpacity={0.55}
+                strokeWidth={3.6} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+              <line x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y} stroke={ROUTE} strokeOpacity={0.7}
+                strokeWidth={1.7} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+            </g>
+          );
         })}
         {/* nodos (tamaño constante en pantalla) */}
         {Object.values(data.rooms).map((r) => {
@@ -283,7 +368,7 @@ export function MapView(props: Props) {
               onPointerEnter={() => onHover(r.roomId)} onPointerLeave={() => onHover(null)}>
               {isFront && <circle r={18} fill="none" stroke={color} strokeWidth={1.5} strokeDasharray="2 3" opacity={0.8} />}
               {ring && <circle r={sel || onP ? 18 : 16} fill="none" stroke={ring} strokeWidth={sel ? 3 : 2.2} />}
-              <circle r={sel || onP ? 12 : 9.5} fill={color} stroke={INK} strokeWidth={1.6} />
+              <circle r={sel || onP ? 12.5 : 10} fill={color} stroke={NODE_RING} strokeWidth={2} />
               {r.ee && edicion && <circle r={3} cx={8} cy={-8} fill="#6e40c9" stroke="#fff" strokeWidth={1} />}
               {labelSet.has(r.roomId) && (
                 <text y={24} textAnchor="middle" fontFamily="Spectral, serif" fontSize={big ? 12.5 : 11}

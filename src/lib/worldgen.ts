@@ -19,18 +19,20 @@ const R_ISLAND = 66;         // radio de tierra de cada pais-isla (compacto y se
 const MOAT_CELLS = 4;        // la costa del continente se aleja esta cantidad de celdas de la tierra
                              // de las islas -> franja de mar limpia (sin peninsulas asomando)
 const MIN_ISLAND_CELLS = 90; // componente mas chico que esto se descarta (sliver)
+const CLIP_SHRINK_CELLS = 2; // erosion del disco de isla para el clip del continente (deja anillo de moat)
 
 // paises que canonicamente son ISLAS (se dibujan como masa separada en el mar)
 const ISLAND_NOMBRES = new Set<string>(['País del Agua', 'País del Remolino']);
 
-export interface Region { pid: string; d: string; color: string; cx: number; cy: number; n: number; island: boolean; bx: number; by: number; bw: number; bh: number }
+export interface Region { pid: string; d: string; bd: string; color: string; cx: number; cy: number; n: number; island: boolean; bx: number; by: number; bw: number; bh: number }
 export interface Kanji { pid: string; x: number; y: number; glyph: string; n: number }
 export interface World {
   seaRect: { x: number; y: number; w: number; h: number };
   land: string;        // continente + islas (relleno base sage)
   continent: string;   // solo el continente (clip de las regiones del continente)
   trimSea: string;     // penínsulas "sin sentido" (tierra sostenida solo por salas de mar) -> se dibujan como mar
-  islands: { pid: string; d: string }[]; // cada isla: su pais + su path (moat + clip propio)
+  landMask: string;    // banda de TIERRA CON DUEÑO dilatada MOAT_CELLS -> clip de los bordes interiores para que ningun trazo flote lejos de la tierra real
+  islands: { pid: string; d: string; clipD: string; moatClip: string }[]; // cada isla: pais + path completo (d) + erosionado (clipD) + dilatado MOAT_CELLS (moatClip, disco de mar del moat)
   coast: string;       // contorno completo, para el trazo de costa
   regions: Region[];   // relleno por pais
   borders: string;     // fronteras internas entre paises (lineas finas)
@@ -59,7 +61,7 @@ export function kanjiFor(nombre: string): string {
 }
 export const KANJI = KANJI_BY_NAME;
 
-const EMPTY: World = { seaRect: { x: 0, y: 0, w: 0, h: 0 }, land: '', continent: '', trimSea: '', islands: [], coast: '', regions: [], borders: '', kanji: [] };
+const EMPTY: World = { seaRect: { x: 0, y: 0, w: 0, h: 0 }, land: '', continent: '', trimSea: '', landMask: '', islands: [], coast: '', regions: [], borders: '', kanji: [] };
 
 interface RoomPt { x: number; y: number; pais: string | null; sea: boolean }
 interface Seg { ax: number; ay: number; bx: number; by: number }
@@ -108,7 +110,7 @@ export function buildWorld(positions: Map<string, Pt>, data: MapData): World {
   const cellLand = new Uint8Array(cc * cr); // union global de tierra (para regiones/fronteras/clip)
   const cellGroup: (string | null)[] = new Array(cc * cr).fill(null); // a que masa (continente/isla) pertenece cada celda
   const islandGroups = [...groupPts.keys()].filter((g) => g !== '__main__');
-  const islandInfo: { pid: string; d: string }[] = []; // pais + path de tierra de cada isla
+  const islandInfo: { pid: string; d: string; clipD: string; moatClip: string }[] = []; // pais + d + clipD + moatClip
   const islandCellMask = new Uint8Array(cc * cr);
 
   // 1) ISLAS primero (para saber donde hay que cavar el mar del continente).
@@ -118,7 +120,13 @@ export function buildWorld(positions: Map<string, Pt>, data: MapData): World {
     const segs = [...(groupSegs.get(g) || []), ...mstSegs(gp)];
     const field = computeField(gp, segs, x0, y0, cols, rows, CELL);
     const res = traceLand(field, R_ISLAND, cols, rows, cc, cr, x0, y0, CELL, 2, null, 0, true);
-    landD += res.d; islandInfo.push({ pid: g, d: res.d });
+    // isla erosionada (para el clip del continente): al meterla en #contclip en vez de la isla
+    // completa, el relleno del vecino se retrae ~CLIP_SHRINK_CELLS y reaparece el anillo de mar (moat)
+    let shrunk = erode(res.cellLand, cc, cr, CLIP_SHRINK_CELLS);
+    let anyShrunk = false; for (let s = 0; s < cc * cr; s++) if (shrunk[s]) { anyShrunk = true; break; }
+    if (!anyShrunk) shrunk = res.cellLand; // isla muy chica: usar disco completo (no rompe, solo pierde ese moat)
+    const moatMask = dilate(res.cellLand, cc, cr, MOAT_CELLS); // disco de la isla + MOAT_CELLS -> anillo de mar de ancho fijo
+    landD += res.d; islandInfo.push({ pid: g, d: res.d, clipD: maskToPath(shrunk, cc, cr, gx, gy), moatClip: maskToPath(moatMask, cc, cr, gx, gy) });
     for (let s = 0; s < cc * cr; s++) if (res.cellLand[s]) { cellLand[s] = 1; cellGroup[s] = g; islandCellMask[s] = 1; }
   }
 
@@ -132,6 +140,22 @@ export function buildWorld(positions: Map<string, Pt>, data: MapData): World {
     landD += res.d; continentD = res.d;
     for (let s = 0; s < cc * cr; s++) if (res.cellLand[s] && cellGroup[s] === null) { cellLand[s] = 1; cellGroup[s] = '__main__'; }
   }
+
+  // --- dueño por celda = pais de la sala NO-neutral mas cercana DEL MISMO GRUPO (isla o continente).
+  // Se calcula ANTES del trimSea para que el recorte no se coma territorio de ningun pais.
+  const namedByGroup = new Map<string, RoomPt[]>();
+  for (const [g, gp] of groupPts) namedByGroup.set(g, gp.filter((p) => p.pais));
+  const cellOwner: (string | null)[] = new Array(cc * cr).fill(null);
+  for (let cj = 0; cj < cr; cj++) for (let ci = 0; ci < cc; ci++) {
+    const s = cj * cc + ci; if (!cellLand[s]) continue;
+    const g = cellGroup[s]; const rooms = g ? namedByGroup.get(g) : null;
+    if (!rooms || !rooms.length) continue;
+    const px = gx(ci) + CELL / 2, py = gy(cj) + CELL / 2;
+    let best = Infinity, bo: string | null = null;
+    for (const p of rooms) { const dx = p.x - px, dy = p.y - py, d = dx * dx + dy * dy; if (d < best) { best = d; bo = p.pais; } }
+    cellOwner[s] = bo;
+  }
+  despeckle(cellOwner, cellLand, cc, cr, 70); // manchitas de un pais rodeadas por otro -> vecino mayoritario
 
   // --- recorte de RENDER: penínsulas "sin sentido" = tierra del continente sostenida SOLO por
   // salas de mar (a mas de R_MAIN de TODO pais y sus aristas pais-pais). NO toca el trazado de
@@ -152,12 +176,27 @@ export function buildWorld(positions: Map<string, Pt>, data: MapData): World {
       }
     }
     const dpf = computeField(landSrcPts, landSrcSegs, x0, y0, cols, rows, CELL); // distancia a tierra "de verdad"
+    // guarda geometrica: no recortar cerca de islas (evita que el trim muerda la costa del vecino del
+    // estrecho). Reemplaza la vieja guarda por-dueño (que hacia inmunes a las peninsulas espurias).
+    const ISLAND_TRIM_GUARD = MOAT_CELLS; // solo el moat inmediato; no proteger penínsulas espurias lejos de la isla
+    const islandNear = dilate(islandCellMask, cc, cr, ISLAND_TRIM_GUARD);
     const orphan = new Uint8Array(cc * cr);
     for (let cj = 0; cj < cr; cj++) for (let ci = 0; ci < cc; ci++) {
-      if (!cellLand[cj * cc + ci] || cellGroup[cj * cc + ci] !== '__main__') continue;
+      if (!cellLand[cj * cc + ci] || cellGroup[cj * cc + ci] !== '__main__' || islandNear[cj * cc + ci]) continue;
       if (dpf[cj * cols + ci] > R_MAIN && dpf[cj * cols + ci + 1] > R_MAIN && dpf[(cj + 1) * cols + ci] > R_MAIN && dpf[(cj + 1) * cols + ci + 1] > R_MAIN) orphan[cj * cc + ci] = 1;
     }
-    const orphanD = dilate(orphan, cc, cr, 1); // 1 celda mas para tapar la linea de costa original
+    const orphanD = dilate(orphan, cc, cr, 3); // margen extra: tapa el ensanche del Catmull-Rom de world.land
+    // Las celdas que el render pinta como MAR pierden su DUEÑO: (a) huerfanas + margen dilatado
+    // (trimSea), y (b) el collar del moat de las islas (islandNear = dilate(isla, MOAT_CELLS), que
+    // el overlay moatband tapa con mar; solo celdas del CONTINENTE — la tierra propia de la isla
+    // conserva su dueño). El Voronoi se las asignaba al pais con la sala mas cercana CRUZANDO EL
+    // AGUA (la tierra la generan las salas "Mar" neutrales), y entonces bd / landMask / fronteras
+    // trazaban anillos alrededor de tierra invisible en pleno estrecho -> las "lineas sueltas".
+    // Sin dueño, el contorno bd retrocede exactamente al borde visible del mapa.
+    for (let s = 0; s < cc * cr; s++) {
+      if (!cellOwner[s]) continue;
+      if (orphanD[s] || (islandNear[s] && cellGroup[s] === '__main__')) cellOwner[s] = null;
+    }
     const O = (a: number, b: number) => (a < 0 || b < 0 || a >= cc || b >= cr ? 0 : orphanD[b * cc + a]);
     const edges: [number, number, number, number][] = [];
     for (let cj = 0; cj < cr; cj++) for (let ci = 0; ci < cc; ci++) {
@@ -174,40 +213,28 @@ export function buildWorld(positions: Map<string, Pt>, data: MapData): World {
     }
   }
 
-  // --- dueño por celda = pais de la sala NO-neutral mas cercana DEL MISMO GRUPO ---
-  // (isla o continente). Asi el color de un pais-isla queda SOLO en su isla y no
-  // mancha el continente vecino (que es "terreno libre" de otro pais).
-  const namedByGroup = new Map<string, RoomPt[]>();
-  for (const [g, gp] of groupPts) namedByGroup.set(g, gp.filter((p) => p.pais));
-  const cellOwner: (string | null)[] = new Array(cc * cr).fill(null);
-  for (let cj = 0; cj < cr; cj++) for (let ci = 0; ci < cc; ci++) {
-    const s = cj * cc + ci; if (!cellLand[s]) continue;
-    const g = cellGroup[s]; const rooms = g ? namedByGroup.get(g) : null;
-    if (!rooms || !rooms.length) continue;
-    const px = gx(ci) + CELL / 2, py = gy(cj) + CELL / 2;
-    let best = Infinity, bo: string | null = null;
-    for (const p of rooms) { const dx = p.x - px, dy = p.y - py, d = dx * dx + dy * dy; if (d < best) { best = d; bo = p.pais; } }
-    cellOwner[s] = bo;
-  }
-  // despeckle: manchitas de un pais rodeadas por otro (ej. celeste de Nieve dentro de Rayo)
-  // se reasignan al pais vecino mayoritario. Se conserva SIEMPRE el territorio mas grande de cada pais.
-  despeckle(cellOwner, cellLand, cc, cr, 70);
 
   // --- regiones por pais (traza el borde del conjunto de celdas del pais) ---
   const regions: Region[] = [];
   const kanji: Kanji[] = [];
   const paisCells = new Map<string, number[]>();
   for (let s = 0; s < cc * cr; s++) { const o = cellOwner[s]; if (o) (paisCells.get(o) || paisCells.set(o, []).get(o)!).push(s); }
+  const moatZone = dilate(islandCellMask, cc, cr, MOAT_CELLS); // corredor de mar del estrecho: las regiones no se derraman ahi
   for (const [P, cells] of paisCells) {
-    // extiendo la region hacia el MAR (no hacia otros paises) hasta ~3 celdas: asi llega a la
-    // costa (el clip al continente la recorta) sin invadir al vecino -> sin hueco en la orilla
-    // ni solape entre paises.
+    // extiendo la region hacia el MAR (no hacia otros paises): asi el relleno (recortado al
+    // continente) llega a la costa sin hueco, y el borde de costa (world.continent ∩ region) la cubre.
     const dmask = new Uint8Array(cc * cr);
     for (const s of cells) dmask[s] = 1;
-    for (let it = 0; it < 3; it++) {
+    // dilato hasta ALCANZAR el contorno inflado del continente (R_MAIN=115): el dilate es 4-conexo,
+    // asi que en los rincones convexos/diagonales llega solo ~n*11u (no n*16u). Con 8 iters daba ~90u
+    // < 115 -> rg.d se quedaba corto de la costa y la costa quedaba sin borde de color (Nieve-arriba,
+    // Rayo-abajo, Fuego-SE). 11 iters ~= 124u >= 115 -> rg.d toca la costa y piece(1) la delinea.
+    // Los guards de abajo (moatZone + celda de otro pais) siguen limitando: solo crece hacia MAR abierto.
+    for (let it = 0; it < 11; it++) {
       const nxt = dmask.slice();
       for (let s = 0; s < cc * cr; s++) {
         if (dmask[s]) continue;
+        if (moatZone[s]) continue; // no invadir islas NI su corredor de moat (evita el derrame por el estrecho)
         if (cellLand[s] && cellOwner[s] && cellOwner[s] !== P) continue; // celda de otro pais: no invadir
         const ci = s % cc, cj = (s - ci) / cc;
         if ((ci > 0 && dmask[s - 1]) || (ci < cc - 1 && dmask[s + 1]) || (cj > 0 && dmask[s - cc]) || (cj < cr - 1 && dmask[s + cc])) nxt[s] = 1;
@@ -239,9 +266,30 @@ export function buildWorld(positions: Map<string, Pt>, data: MapData): World {
       d += catmullClosedPath(ring);
     }
     if (!d) continue;
+    // contorno REAL del pais desde sus celdas SIN dilatar (costa + fronteras): es el borde
+    // verdadero, no depende del clip al continente ni de world.coast -> ningun pais se queda sin borde
+    const omask = new Uint8Array(cc * cr);
+    for (const s of cells) omask[s] = 1;
+    const inOM = (ci: number, cj: number) => ci >= 0 && cj >= 0 && ci < cc && cj < cr && omask[cj * cc + ci] === 1;
+    const bedges: [number, number, number, number][] = [];
+    for (const s of cells) {
+      const ci = s % cc, cj = (s - ci) / cc;
+      if (!inOM(ci - 1, cj)) bedges.push([ci, cj, ci, cj + 1]);
+      if (!inOM(ci + 1, cj)) bedges.push([ci + 1, cj, ci + 1, cj + 1]);
+      if (!inOM(ci, cj - 1)) bedges.push([ci, cj, ci + 1, cj]);
+      if (!inOM(ci, cj + 1)) bedges.push([ci, cj + 1, ci + 1, cj + 1]);
+    }
+    let bd = '';
+    for (let ring of chainVertexRings(bedges)) {
+      ring = ring.map((v) => ({ x: gx(v.x), y: gy(v.y) }));
+      ring = cleanRing(ring);
+      if (ring.length < 3) continue;
+      ring = chaikinClosed(ring, 3);
+      bd += catmullClosedPath(ring);
+    }
     const cx = sx / cells.length, cy = sy / cells.length;
     const color = data.paises[P]?.color || '#888';
-    regions.push({ pid: P, d, color, cx, cy, n: roomCount.get(P) || 0, island: islandIds.has(P), bx: bxMin, by: byMin, bw: bxMax - bxMin, bh: byMax - byMin });
+    regions.push({ pid: P, d, bd, color, cx, cy, n: roomCount.get(P) || 0, island: islandIds.has(P), bx: bxMin, by: byMin, bw: bxMax - bxMin, bh: byMax - byMin });
     kanji.push({ pid: P, x: cx, y: cy, glyph: kanjiFor(data.paises[P]?.nombre || P), n: roomCount.get(P) || 0 });
   }
 
@@ -263,9 +311,16 @@ export function buildWorld(positions: Map<string, Pt>, data: MapData): World {
     borders += 'M' + ring.map((p) => `${r1(p.x)} ${r1(p.y)}`).join('L');
   }
 
+  // --- banda de TIERRA CON DUEÑO (union de todas las celdas de tierra de cualquier pais) dilatada
+  // MOAT_CELLS: recorta el borde bd (piece 2) para que sus excursiones al estrecho / mar abierto
+  // (mas alla de ~MOAT_CELLS de tierra con dueño real) NO se dibujen. La costa (piece 1) NO lo usa.
+  const ownedLandMask = new Uint8Array(cc * cr);
+  for (let s = 0; s < cc * cr; s++) if (cellLand[s] && cellOwner[s]) ownedLandMask[s] = 1;
+  const landMaskD = maskToPath(dilate(ownedLandMask, cc, cr, MOAT_CELLS), cc, cr, gx, gy);
+
   return {
     seaRect: { x: x0 - 4000, y: y0 - 4000, w: (x1 - x0) + 8000, h: (y1 - y0) + 8000 },
-    land: landD, continent: continentD, trimSea: trimD, islands: islandInfo, coast: landD, regions, borders, kanji,
+    land: landD, continent: continentD, trimSea: trimD, landMask: landMaskD, islands: islandInfo, coast: landD, regions, borders, kanji,
   };
 }
 
@@ -435,6 +490,26 @@ function erode(mask: Uint8Array, cc: number, cr: number, k: number): Uint8Array 
     cur = out;
   }
   return cur;
+}
+
+// convierte una mascara de celdas en un path SVG suave (mismo pipeline que usa el orphan/regiones)
+function maskToPath(mask: Uint8Array, cc: number, cr: number, gx: (i: number) => number, gy: (j: number) => number): string {
+  const M = (a: number, b: number) => (a < 0 || b < 0 || a >= cc || b >= cr ? 0 : mask[b * cc + a]);
+  const edges: [number, number, number, number][] = [];
+  for (let cj = 0; cj < cr; cj++) for (let ci = 0; ci < cc; ci++) {
+    if (!mask[cj * cc + ci]) continue;
+    if (!M(ci - 1, cj)) edges.push([ci, cj, ci, cj + 1]);
+    if (!M(ci + 1, cj)) edges.push([ci + 1, cj, ci + 1, cj + 1]);
+    if (!M(ci, cj - 1)) edges.push([ci, cj, ci + 1, cj]);
+    if (!M(ci, cj + 1)) edges.push([ci, cj + 1, ci + 1, cj + 1]);
+  }
+  let d = '';
+  for (let ring of chainVertexRings(edges)) {
+    ring = ring.map((v) => ({ x: gx(v.x), y: gy(v.y) }));
+    ring = cleanRing(ring); if (ring.length < 3) continue;
+    ring = chaikinClosed(ring, 2); d += catmullClosedPath(ring);
+  }
+  return d;
 }
 
 // reasigna manchitas (componentes chicos de un pais rodeados por otro) al vecino mayoritario.
