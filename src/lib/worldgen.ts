@@ -20,6 +20,11 @@ const MOAT_CELLS = 4;        // la costa del continente se aleja esta cantidad d
                              // de las islas -> franja de mar limpia (sin peninsulas asomando)
 const MIN_ISLAND_CELLS = 90; // componente mas chico que esto se descarta (sliver)
 const CLIP_SHRINK_CELLS = 2; // erosion del disco de isla para el clip del continente (deja anillo de moat)
+const WORLD_SEA_CELLS = 12;  // radio (en celdas) del OCEANO que rodea al mundo entero (continente +
+                             // islas): aguada de agua que unifica el mapa sobre el fondo y cubre
+                             // los estrechos de las islas hasta las costas vecinas
+const RIPPLE_CELLS = [2, 5, 8]; // anillos de tinta concentricos alrededor de la costa (estilo mapa
+                             // japones/mangaka): contornos de la tierra visible dilatada k celdas
 
 // paises que canonicamente son ISLAS (se dibujan como masa separada en el mar)
 const ISLAND_NOMBRES = new Set<string>(['País del Agua', 'País del Remolino']);
@@ -32,7 +37,11 @@ export interface World {
   continent: string;   // solo el continente (clip de las regiones del continente)
   trimSea: string;     // penínsulas "sin sentido" (tierra sostenida solo por salas de mar) -> se dibujan como mar
   landMask: string;    // banda de TIERRA CON DUEÑO dilatada MOAT_CELLS -> clip de los bordes interiores para que ningun trazo flote lejos de la tierra real
-  islands: { pid: string; d: string; clipD: string; moatClip: string }[]; // cada isla: pais + path completo (d) + erosionado (clipD) + dilatado MOAT_CELLS (moatClip, disco de mar del moat)
+  ocean: { d: string; x: number; y: number; w: number; h: number }; // aguada de OCEANO que rodea al mundo entero (dilate de la tierra VISIBLE, WORLD_SEA_CELLS) + bbox para las olas
+  ripples: string[];   // anillos de tinta concentricos alrededor de la costa visible (RIPPLE_CELLS), del mas cercano al mas lejano
+  coastVis: string;    // contorno de la tierra VISIBLE (dilate 0): la aguada de acuarela lo entinta como trazo difuminado
+  waves: { x: number; y: number; s: number; a: number; fl: number; t: number; g: number }[]; // glifos de ola mangaka dispersos: centro, escala, rotacion (grados), flip, tipo (0 oleaje/1 cresta con rulo), grupo de fase 0..3
+  islands: { pid: string; d: string; clipD: string; moatClip: string }[]; // cada isla: pais + path completo (d) + erosionado (clipD) + dilatado MOAT_CELLS (moatClip, disco del moat — ahora AGUJERO real via mask)
   coast: string;       // contorno completo, para el trazo de costa
   regions: Region[];   // relleno por pais
   borders: string;     // fronteras internas entre paises (lineas finas)
@@ -61,7 +70,7 @@ export function kanjiFor(nombre: string): string {
 }
 export const KANJI = KANJI_BY_NAME;
 
-const EMPTY: World = { seaRect: { x: 0, y: 0, w: 0, h: 0 }, land: '', continent: '', trimSea: '', landMask: '', islands: [], coast: '', regions: [], borders: '', kanji: [] };
+const EMPTY: World = { seaRect: { x: 0, y: 0, w: 0, h: 0 }, land: '', continent: '', trimSea: '', landMask: '', ocean: { d: '', x: 0, y: 0, w: 0, h: 0 }, ripples: [], coastVis: '', waves: [], islands: [], coast: '', regions: [], borders: '', kanji: [] };
 
 interface RoomPt { x: number; y: number; pais: string | null; sea: boolean }
 interface Seg { ax: number; ay: number; bx: number; by: number }
@@ -161,6 +170,7 @@ export function buildWorld(positions: Map<string, Pt>, data: MapData): World {
   // salas de mar (a mas de R_MAIN de TODO pais y sus aristas pais-pais). NO toca el trazado de
   // tierra (seguro, sin fragmentar); se dibujan como MAR encima al renderizar.
   let trimD = '';
+  let orphanDG: Uint8Array | null = null; // hoisted: lo usa el oceano/ripples (tierra VISIBLE = cellLand - orphanD)
   {
     // fuentes de tierra "de verdad" = todo lo del continente MENOS las salas "Mar" (paises y
     // neutrales de tierra como Bosque/Camino/Puente cuentan). Lo que quede tierra a mas de R_MAIN
@@ -186,6 +196,7 @@ export function buildWorld(positions: Map<string, Pt>, data: MapData): World {
       if (dpf[cj * cols + ci] > R_MAIN && dpf[cj * cols + ci + 1] > R_MAIN && dpf[(cj + 1) * cols + ci] > R_MAIN && dpf[(cj + 1) * cols + ci + 1] > R_MAIN) orphan[cj * cc + ci] = 1;
     }
     const orphanD = dilate(orphan, cc, cr, 3); // margen extra: tapa el ensanche del Catmull-Rom de world.land
+    orphanDG = orphanD;
     // Las celdas que el render pinta como MAR pierden su DUEÑO: (a) huerfanas + margen dilatado
     // (trimSea), y (b) el collar del moat de las islas (islandNear = dilate(isla, MOAT_CELLS), que
     // el overlay moatband tapa con mar; solo celdas del CONTINENTE — la tierra propia de la isla
@@ -318,9 +329,65 @@ export function buildWorld(positions: Map<string, Pt>, data: MapData): World {
   for (let s = 0; s < cc * cr; s++) if (cellLand[s] && cellOwner[s]) ownedLandMask[s] = 1;
   const landMaskD = maskToPath(dilate(ownedLandMask, cc, cr, MOAT_CELLS), cc, cr, gx, gy);
 
+  // --- OCEANO + anillos de tinta alrededor del mundo entero. Parte de la tierra VISIBLE
+  // (cellLand menos las peninsulas trimmed) para que el agua y los anillos abracen la costa
+  // que realmente se ve, no los fantasmas recortados.
+  const visLand = new Uint8Array(cc * cr);
+  for (let s = 0; s < cc * cr; s++) if (cellLand[s] && !(orphanDG && orphanDG[s])) visLand[s] = 1;
+  const oceanMask = dilate(visLand, cc, cr, WORLD_SEA_CELLS);
+  let oxa = Infinity, oya = Infinity, oxb = -Infinity, oyb = -Infinity;
+  for (let s = 0; s < cc * cr; s++) {
+    if (!oceanMask[s]) continue; const ci = s % cc, cj = (s - ci) / cc;
+    const px = gx(ci), py = gy(cj);
+    if (px < oxa) oxa = px; if (px + CELL > oxb) oxb = px + CELL;
+    if (py < oya) oya = py; if (py + CELL > oyb) oyb = py + CELL;
+  }
+  const ocean = { d: maskToPath(oceanMask, cc, cr, gx, gy), x: oxa, y: oya, w: oxb - oxa, h: oyb - oya };
+  const ripples = RIPPLE_CELLS.map((k) => maskToPath(dilate(visLand, cc, cr, k), cc, cr, gx, gy));
+
+  // --- COSTA VISIBLE (dilate 0): contorno exacto de la tierra que se ve. La aguada de
+  // acuarela se dibuja COMO TRAZO difuminado de este contorno -> cada costa entinta su
+  // propio borde y nada puede fusionarse en blobs (a diferencia de los anillos dilatados,
+  // que en los estrechos se unian en una malla).
+  const coastVis = maskToPath(visLand, cc, cr, gx, gy);
+
+  // --- OLAS mangaka: glifos de ola dispersos por la banda de oceano. Deterministas (hash
+  // por celda -> estables entre renders/HMR), MAS DENSOS cerca de la costa, con separacion
+  // minima. No forman malla: son trazos sueltos.
+  const noGlyph = dilate(visLand, cc, cr, 2);   // franja limpia pegada a la costa (ahi vive la aguada; cubre los moats)
+  const bandNear = dilate(visLand, cc, cr, 6);  // hasta 6 celdas de tierra: denso
+  const bandMid = dilate(visLand, cc, cr, 9);   // hasta 9 celdas: medio (mas alla: ralo)
+  const rnd = (ci: number, cj: number, k: number) =>
+    (((((ci + 7) * 73856093) ^ ((cj + 11) * 19349663) ^ (k * 83492791)) >>> 0) % 1000) / 1000;
+  const waves: World['waves'] = [];
+  const taken = new Uint8Array(cc * cr);
+  const SP = 4; // separacion minima entre glifos, en celdas (Chebyshev): 64u
+  for (let cj = 0; cj < cr && waves.length < 420; cj++) for (let ci = 0; ci < cc; ci++) {
+    const s = cj * cc + ci;
+    if (!oceanMask[s] || noGlyph[s]) continue;                    // solo agua abierta
+    const p = bandNear[s] ? 0.085 : bandMid[s] ? 0.05 : 0.025;    // densidad por distancia a costa
+    if (rnd(ci, cj, 1) >= p) continue;
+    let free = true;
+    for (let dj = -SP; dj <= SP && free; dj++) for (let di = -SP; di <= SP; di++) {
+      const ni = ci + di, nj = cj + dj;
+      if (ni >= 0 && nj >= 0 && ni < cc && nj < cr && taken[nj * cc + ni]) { free = false; break; }
+    }
+    if (!free) continue;
+    taken[s] = 1;
+    waves.push({
+      x: r1(gx(ci) + CELL / 2 + (rnd(ci, cj, 2) - 0.5) * 20),
+      y: r1(gy(cj) + CELL / 2 + (rnd(ci, cj, 3) - 0.5) * 20),
+      s: Math.round((1.1 + rnd(ci, cj, 4) * 0.7) * 100) / 100,   // escala 1.1..1.8 (legible al zoom por defecto)
+      a: Math.round((rnd(ci, cj, 5) - 0.5) * 16),                // rotacion -8..8 grados
+      fl: rnd(ci, cj, 7) < 0.35 ? -1 : 1,                        // flip horizontal ocasional
+      t: rnd(ci, cj, 6) < 0.12 ? 1 : 0,                          // ~12%: cresta ukiyo-e con rulo
+      g: (ci * 7 + cj * 13) % 4,                                 // grupo de fase 0..3 (mezcla espacial)
+    });
+  }
+
   return {
     seaRect: { x: x0 - 4000, y: y0 - 4000, w: (x1 - x0) + 8000, h: (y1 - y0) + 8000 },
-    land: landD, continent: continentD, trimSea: trimD, landMask: landMaskD, islands: islandInfo, coast: landD, regions, borders, kanji,
+    land: landD, continent: continentD, trimSea: trimD, landMask: landMaskD, ocean, ripples, coastVis, waves, islands: islandInfo, coast: landD, regions, borders, kanji,
   };
 }
 

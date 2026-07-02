@@ -29,6 +29,9 @@ const ROUTE_CASE = '#eef2f2'; // halo claro debajo de la ruta para que se lea so
 const NODE_RING = '#20190d';  // anillo del nodo (casi negro)
 // paleta del mapa (mar/tierra) — apagada, cartografica
 const SEA = '#9fb2bd', LAND = '#c3cdae', COAST = '#7f8894', LABEL_INK = '#3c4a52';
+const WATER = '#8fb4c6';   // aguada de oceano (translucida sobre el arte de fondo)
+const SEA_INK = '#4a7186'; // tinta de costa (estilo mangaka)
+const FOAM = '#e2eef2';    // espuma de las olas: clara, para leerse sobre el fondo OSCURO (ukiyo-e)
 
 // version mas intensa (saturada + oscura) del color de un pais, para su borde.
 // Piso de contraste: los colores CLAROS (ej Nieve #A6DCEF, cyan casi blanco) se saturan y
@@ -97,9 +100,21 @@ export function MapView(props: Props) {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const p of pts) { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); }
     const pad = 90, w = maxX - minX + pad * 2, h = maxY - minY + pad * 2;
-    const k = Math.min(rect.width / w, rect.height / h, 1.4);
+    // encuadrar en el area VISIBLE (nada del mapa tapado por la UI):
+    // - izquierda: .left-rail (left 18 + width 292) en pantallas anchas
+    // - arriba: .title-banner / abajo: .helpbar — medidos en vivo (en mobile son display:none)
+    const RAIL = 18 + 292 + 22;
+    const useRail = rect.width - RAIL > rect.width * 0.45;
+    const vx = useRail ? RAIL : 0;
+    const banner = document.querySelector('.title-banner')?.getBoundingClientRect();
+    const help = document.querySelector('.helpbar')?.getBoundingClientRect();
+    const topIn = banner && banner.height > 0 ? Math.max(0, banner.bottom - rect.top + 12) : 0;
+    const botIn = help && help.height > 0 ? Math.max(0, rect.bottom - help.top + 12) : 0;
+    let vy = topIn, vw = rect.width - vx, vh = rect.height - topIn - botIn;
+    if (vh < 120 || vw < 120) { vy = 0; vw = rect.width; vh = rect.height; } // fallback si la UI come todo
+    const k = Math.min(vw / w, vh / h, 1.4);
     if (!isFinite(k) || k <= 0) return;
-    setView({ k, x: rect.width / 2 - ((minX + maxX) / 2) * k, y: rect.height / 2 - ((minY + maxY) / 2) * k });
+    setView({ k, x: vx + vw / 2 - ((minX + maxX) / 2) * k, y: vy + vh / 2 - ((minY + maxY) / 2) * k });
   }, [positions]);
 
   const exportPNG = useCallback(() => {
@@ -244,8 +259,66 @@ export function MapView(props: Props) {
           <clipPath id="landmaskclip"><path d={world.landMask} /></clipPath>
           {world.regions.map((rg) => (<clipPath key={'rc' + rg.pid} id={'rgclip-' + rg.pid}><path d={rg.d} /></clipPath>))}
           {world.islands.map(({ moatClip }, i) => (<clipPath key={'mc' + i} id={'moatclip-' + i}><path d={moatClip} /></clipPath>))}
+          {/* borde exterior difuminado de la aguada de oceano (se funde con el arte de fondo) */}
+          <filter id="seasoft" x="-15%" y="-15%" width="130%" height="130%"><feGaussianBlur stdDeviation={9} /></filter>
+          {/* aguada de acuarela costera: blur ancho para la banda de tinta que abraza cada costa */}
+          <filter id="coastwash" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation={7} /></filter>
+          {/* glifos de ola mangaka ("a mano"): wavelet = oleaje de dos crestas con eco;
+              wcrest = cresta ukiyo-e con rulo. Instanciados via <use> segun worldgen.waves. */}
+          <g id="wavelet" fill="none" stroke={FOAM} strokeLinecap="round">
+            <path d="M-19 2 Q-13 -5 -5 0 Q1 5 9 0 Q13 -3 18 -1" strokeWidth={2.8} />
+            <path d="M-9 8 Q-3 3 5 7 Q9 9 13 7" strokeWidth={2.1} opacity={0.75} />
+          </g>
+          <g id="wcrest" fill="none" stroke={FOAM} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M-20 8 Q-10 -6 4 -7 Q14 -7 14 0 Q14 6 8 5 Q4 4 6 0" strokeWidth={2.8} />
+            <path d="M-14 13 Q-2 7 10 12" strokeWidth={2.1} opacity={0.7} />
+          </g>
+          {/* mascara que AGUJEREA la pila de tierra: (a) peninsulas trimmed y (b) el MOAT de cada
+              isla — ambos son agujeros REALES por los que se ve la aguada de oceano de abajo */}
+          <mask id="trimm" maskUnits="userSpaceOnUse" x={world.seaRect.x} y={world.seaRect.y} width={world.seaRect.w} height={world.seaRect.h}>
+            <rect x={world.seaRect.x} y={world.seaRect.y} width={world.seaRect.w} height={world.seaRect.h} fill="#fff" />
+            {world.trimSea && <path d={world.trimSea} fill="#000" />}
+            {world.islands.map(({ moatClip }, i) => (<path key={'mh' + i} d={moatClip} fill="#000" />))}
+          </mask>
         </defs>
-        <rect x={world.seaRect.x} y={world.seaRect.y} width={world.seaRect.w} height={world.seaRect.h} fill={SEA} />
+        {/* OCEANO mangaka alrededor del MUNDO ENTERO (una sola masa de agua, incluye los
+            estrechos): mar de PAPEL tenue + AGUADA de acuarela que abraza cada costa (trazo
+            difuminado del contorno VISIBLE — sin anillos concentricos: no puede formar malla)
+            + olas de tinta dibujadas a mano, dispersas — densas cerca de la costa, ralas mar
+            adentro — que respiran por grupos y derivan lento. Va DEBAJO de la tierra. */}
+        {world.ocean.d && (
+          <g style={{ pointerEvents: 'none' }}>
+            <clipPath id="oceanclip"><path d={world.ocean.d} /></clipPath>
+            {/* aguada apenas insinuada: UNA SUTILEZA — el fondo domina, el mar solo se sugiere */}
+            <path d={world.ocean.d} fill="#d5e2e4" fillOpacity={0.1} filter="url(#seasoft)" />
+            <g clipPath="url(#oceanclip)">
+              {/* aguada costera: halo minimo alrededor de la tierra, casi subliminal */}
+              {world.coastVis && (
+                <g className="sea-tide" filter="url(#coastwash)">
+                  <path d={world.coastVis} fill="none" stroke="#bcd9e2" strokeWidth={50} strokeOpacity={0.08} strokeLinejoin="round" />
+                  <path d={world.coastVis} fill="none" stroke="#cfe4ea" strokeWidth={18} strokeOpacity={0.1} strokeLinejoin="round" />
+                </g>
+              )}
+              {/* olas: 4 grupos de fase entrelazados espacialmente; cada grupo respira su
+                  opacidad desfasado (visible a cualquier zoom) y todo el campo deriva lento */}
+              <g className="sea-drift">
+                {[0, 1, 2, 3].map((ph) => (
+                  <g key={'wph' + ph} className={'sea-swell sea-swell-' + ph}>
+                    {world.waves.filter((w) => w.g === ph).map((w, i) => (
+                      <use key={i} href={w.t ? '#wcrest' : '#wavelet'}
+                        transform={`translate(${w.x} ${w.y}) rotate(${w.a}) scale(${w.s * w.fl} ${w.s})`} />
+                    ))}
+                  </g>
+                ))}
+              </g>
+            </g>
+          </g>
+        )}
+        {/* pila de TIERRA del continente, enmascarada: las peninsulas trimmed Y los moats de las
+            islas son agujeros de verdad que dejan ver la aguada de oceano */}
+        <g mask="url(#trimm)">
+        {/* sombra suave del landmass (offset + blur): asienta el mundo sobre el fondo */}
+        <path d={world.land} fill="#3d3422" stroke="none" opacity={0.16} transform="translate(7 12)" filter="url(#seasoft)" />
         <path d={world.land} fill={LAND} stroke="none" />
         {/* (moatpre eliminado: era un stroke de mar redundante alrededor de la isla que asomaba como
             lineas grises sobre el sage; el moat real ahora lo da el overlay moatClip mas abajo) */}
@@ -286,17 +359,16 @@ export function MapView(props: Props) {
             </g>
           );
         })}
-        {/* MOAT: disco de mar de ancho fijo (dilate cellLand MOAT_CELLS) sobre el relleno del continente
-            y del sage base -> anillo de mar ancho y uniforme; tapa la peninsula sage y cualquier derrame */}
-        {world.islands.map(({ moatClip }, i) => (
-          <path key={'moatband' + i} d={moatClip} fill={SEA} stroke="none" />
-        ))}
-        {/* isla redibujada encima (tapa el centro del disco -> queda el anillo de mar) + SU borde */}
+        </g>
+        {/* (moatband ELIMINADO: el moat ahora es un AGUJERO real en la mascara #trimm — a traves
+            de el se ve la aguada de oceano con sus anillos de tinta, sin parche pintado encima) */}
+        {/* islas FUERA de la mascara (el disco del moat las tacharia): sombra propia + tierra + borde */}
         {world.islands.map(({ pid, d }, i) => {
           const rg = world.regions.find((r) => r.pid === pid);
           const col = rg ? intensify(rg.color) : COAST, op = matchPais(pid) ? 0.95 : 0.22;
           return (
             <g key={'moat' + i}>
+              <path d={d} fill="#3d3422" stroke="none" opacity={0.16} transform="translate(7 12)" filter="url(#seasoft)" />
               <path d={d} fill={LAND} stroke="none" />
               <clipPath id={'islclip' + i}><path d={d} /></clipPath>
               {/* relleno: imagen/color sobre TODO el landmass d (clip solo a islclip, no a rg.d) */}
@@ -321,17 +393,16 @@ export function MapView(props: Props) {
             Ahora son redundantes: al limpiar el dueño de las celdas bajo el collar del moat, el bd de
             cada pais ya traza su costa del estrecho exactamente en el rim — y bd si esta recortado a
             la banda de tierra real.) */}
-        {/* recorte: penínsulas sin sentido (solo salas de mar) se pintan como MAR — DESPUES de los
-            bordes para tapar cualquier trazo fantasma sobre esas penínsulas trimeadas */}
-        {world.trimSea && <path d={world.trimSea} fill={SEA} stroke="none" />}
+        {/* (fill de trimSea ELIMINADO: ahora es la mascara #trimm sobre la pila de tierra — las
+            peninsulas sin sentido y los moats son AGUJEROS reales que dejan ver la aguada) */}
         {world.kanji.map((k) => {
           const fs = Math.min(172, 52 + k.n * 3.6), on = matchPais(k.pid);
           return (
             <text key={'k' + k.pid} x={k.x} y={k.y} textAnchor="middle" dominantBaseline="central"
               fontFamily="'Hiragino Mincho ProN','Yu Mincho','Noto Serif JP','Noto Sans JP',serif"
               fontSize={fs} fontWeight={700}
-              fill={LABEL_INK} fillOpacity={on ? 0.5 : 0.14}
-              paintOrder="stroke" stroke="#f3efe4" strokeOpacity={on ? 0.5 : 0.14} strokeWidth={fs * 0.05}
+              fill={LABEL_INK} fillOpacity={on ? 0.68 : 0.16}
+              paintOrder="stroke" stroke="#f3efe4" strokeOpacity={on ? 0.85 : 0.2} strokeWidth={fs * 0.09}
               style={{ pointerEvents: 'none' }}>{k.glyph}</text>
           );
         })}

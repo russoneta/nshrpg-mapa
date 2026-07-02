@@ -123,14 +123,18 @@ export function App() {
 
   return (
     <div className="app">
-      <div className="parchment" />
+      {/* fondo detras de todo: arte oscuro (Valle del Fin) — sin velo, el mapa flota encima */}
+      <div className="parchment" style={{
+        backgroundImage: "url('img/fondo-oscuro.webp')",
+        backgroundSize: 'cover', backgroundPosition: 'center',
+      }} />
       <MapView data={data} positions={positions} paisColor={paisColor}
         selected={selected} hovered={hovered} path={path} frontier={frontier} realEdges={realEdges}
         filterPais={filterPais} searchHits={searchHits} edicion={edicion}
         onSelect={onSelect} onHover={setHovered} onMoveNode={onMoveNode} apiRef={api} />
 
       <div className="panel title-banner">
-        <h1>Mundo NSHRPG <span className="alpha">ALPHA 1.24</span></h1>
+        <h1>Mundo NSHRPG <span className="alpha">ALPHA 1.25</span></h1>
         <div className="sub">{Object.keys(data.rooms).length} salas · {nPaises} países · by Take</div>
       </div>
 

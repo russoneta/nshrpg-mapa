@@ -38,6 +38,29 @@ body {
 
 .map-svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
 .map-svg.grabbing { cursor: grabbing; }
+
+/* ── mar mangaka ── */
+/* deriva global del campo de olas: muy lenta, ida y vuelta (sin salto de loop) */
+.sea-drift { animation: seaDrift 40s ease-in-out infinite alternate; }
+@keyframes seaDrift { from { transform: translateX(0); } to { transform: translateX(30px); } }
+/* respiracion por grupos: cada cuarto de las olas sube de 0.35 a 0.75 de opacidad, desfasado
+   (opacidad = visible a cualquier zoom) + bob vertical chico (visible de cerca) */
+.sea-swell { animation-name: seaSwell; animation-timing-function: ease-in-out; animation-iteration-count: infinite; }
+.sea-swell-0 { animation-duration: 7.5s;  animation-delay: 0s; }
+.sea-swell-1 { animation-duration: 9s;    animation-delay: -3s; }
+.sea-swell-2 { animation-duration: 10.5s; animation-delay: -5.5s; }
+.sea-swell-3 { animation-duration: 12s;   animation-delay: -8s; }
+@keyframes seaSwell {
+  0%, 100% { opacity: 0.08; transform: translateY(0); }
+  50%      { opacity: 0.24; transform: translateY(-3px); }
+}
+/* marea: la aguada costera se hincha y afloja, lenta */
+.sea-tide { animation: seaTide 9s ease-in-out infinite alternate; }
+@keyframes seaTide { from { opacity: 0.7; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .sea-drift, .sea-swell, .sea-tide { animation: none; }
+  .sea-swell { opacity: 0.16; }
+}
 .flow { animation: flow 0.7s linear infinite; }
 @keyframes flow { to { stroke-dashoffset: -16; } }
 
