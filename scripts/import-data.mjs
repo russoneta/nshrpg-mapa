@@ -1,7 +1,7 @@
 // pasa el export de la captura al formato del sitio: arregla los nombres de
 // pais, saca las imagenes a public/img/ y escribe un map.json liviano.
 // uso: node scripts/import-data.mjs <export.json>
-import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
@@ -44,10 +44,14 @@ for (const id in (d.paises || {})) {
   if (COLORS[d.paises[id].nombre]) d.paises[id].color = COLORS[d.paises[id].nombre];
 }
 
-// imagenes
+// imagenes: limpiar SOLO las fotos de salas (archivos numericos <roomId>.<ext>).
+// OJO: aca antes habia un rmSync de TODO public/img — borraba tambien los assets de diseño
+// (paises/*, fondo-*.webp) y rompia el sitio en cada actualizacion de datos.
 const imgDir = resolve(root, 'public/img');
-if (existsSync(imgDir)) rmSync(imgDir, { recursive: true, force: true });
 mkdirSync(imgDir, { recursive: true });
+for (const f of readdirSync(imgDir)) {
+  if (/^\d+\.(png|jpe?g|webp|gif)$/i.test(f)) rmSync(resolve(imgDir, f), { force: true });
+}
 
 let n = 0;
 for (const id in (d.rooms || {})) {
